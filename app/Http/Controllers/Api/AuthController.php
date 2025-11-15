@@ -1,0 +1,344 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
+use App\Models\User;
+use App\Models\Member;
+
+class AuthController extends Controller
+{
+    public function register(Request $request)
+    {
+        $request->merge([
+            'gender' => match ($request->gender) {
+                'Mwanaume' => 'M',
+                'Mwanamke' => 'F',
+                default => $request->gender,
+            },
+        ]);
+
+        $request->validate([
+            'full_name' => 'required|string|max:255',
+            'gender' => 'required|in:M,F',
+            'birth_date' => 'nullable|date',
+            'birth_place' => 'nullable|string|max:255',
+            'marital_status' => 'nullable|in:Ameoa,Ameolewa,Hajaoa,Hajaolewa,Mjane,Mgane',
+            'spouse_name' => 'nullable|string|max:255|required_if:marital_status,Ameoa,Ameolewa',
+            'children_count' => 'nullable|integer|min:0',
+            'zone' => 'nullable|string|max:255',
+            'phone' => 'required|string|max:20|unique:users,phone',
+            'email' => 'required|email|max:255|unique:users,email',
+            'password' => 'required|string|min:6|confirmed',
+
+            // Imani
+            'date_of_conversion' => 'nullable|date',
+            'church_of_conversion' => 'nullable|string',
+            'baptism_date' => 'nullable|date',
+            'baptism_place' => 'nullable|string',
+            'baptizer_name' => 'nullable|string',
+            'baptizer_title' => 'nullable|string',
+            'previous_church' => 'nullable|string',
+            'church_service' => 'nullable|string',
+            'service_duration' => 'nullable|string',
+
+            // Elimu
+            'education_level' => 'nullable|string',
+            'profession' => 'nullable|string',
+            'occupation' => 'nullable|string',
+            'work_place' => 'nullable|string',
+            'work_contact' => 'nullable|string',
+
+            // Familia
+            'lives_alone' => 'nullable|boolean',
+            'lives_with' => 'nullable|string',
+        ]);
+
+        try {
+            $user = User::create([
+                'full_name' => $request->full_name,
+                'gender' => $request->gender,
+                'birth_date' => $request->birth_date,
+                'birth_place' => $request->birth_place,
+                'marital_status' => $request->marital_status,
+                'spouse_name' => $request->spouse_name,
+                'children_count' => $request->children_count,
+                'zone' => $request->zone,
+                'phone' => $request->phone,
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
+                'role' => null,
+            ]);
+
+            Member::create([
+                'user_id' => $user->id,
+                'full_name' => $request->full_name,
+                'gender' => $request->gender,
+                'birth_date' => $request->birth_date,
+                'birth_place' => $request->birth_place,
+                'marital_status' => $request->marital_status,
+                'spouse_name' => $request->spouse_name,
+                'number_of_children' => $request->children_count,
+                'residential_zone' => $request->zone,
+                'phone_number' => $request->phone,
+                'email' => $request->email,
+
+                'date_of_conversion' => $request->date_of_conversion,
+                'church_of_conversion' => $request->church_of_conversion,
+                'baptism_date' => $request->baptism_date,
+                'baptism_place' => $request->baptism_place,
+                'baptizer_name' => $request->baptizer_name,
+                'baptizer_title' => $request->baptizer_title,
+                'previous_church' => $request->previous_church,
+                'church_service' => $request->church_service,
+                'service_duration' => $request->service_duration,
+
+                'education_level' => $request->education_level,
+                'profession' => $request->profession,
+                'occupation' => $request->occupation,
+                'work_place' => $request->work_place,
+                'work_contact' => $request->work_contact,
+
+                'lives_alone' => $request->lives_alone,
+                'lives_with' => $request->lives_with,
+
+                'membership_status' => 'active',
+            ]);
+
+            $token = $user->createToken('auth_token')->plainTextToken;
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'User registered and member profile created successfully.',
+                'token' => $token,
+                'user' => $user,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Server error: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    public function updateProfile(Request $request)
+    {
+        $request->validate([
+            'full_name' => 'required|string|max:255',
+            'gender' => 'required|in:M,F',
+            'birth_date' => 'nullable|date',
+            'birth_place' => 'nullable|string|max:255',
+            'marital_status' => 'nullable|in:Ameoa,Ameolewa,Hajaoa,Hajaolewa,Mjane,Mgane',
+            'spouse_name' => 'nullable|string|required_if:marital_status,Ameoa,Ameolewa',
+            'children_count' => 'nullable|integer|min:0',
+            'zone' => 'nullable|string|max:255',
+            'phone' => 'required|string|max:20',
+            'email' => 'required|email|max:255',
+
+            // Imani
+            'date_of_conversion' => 'nullable|date',
+            'church_of_conversion' => 'nullable|string',
+            'baptism_date' => 'nullable|date',
+            'baptism_place' => 'nullable|string',
+            'baptizer_name' => 'nullable|string',
+            'baptizer_title' => 'nullable|string',
+            'previous_church' => 'nullable|string',
+            'church_service' => 'nullable|string',
+            'service_duration' => 'nullable|string',
+
+            // Elimu
+            'education_level' => 'nullable|string',
+            'profession' => 'nullable|string',
+            'occupation' => 'nullable|string',
+            'work_place' => 'nullable|string',
+            'work_contact' => 'nullable|string',
+
+            // Familia
+            'lives_alone' => 'nullable|boolean',
+            'lives_with' => 'nullable|string',
+        ]);
+
+        $user = $request->user();
+        $user->update([
+            'full_name' => $request->full_name,
+            'phone' => $request->phone,
+            'email' => $request->email,
+        ]);
+
+        $member = Member::updateOrCreate(
+            ['user_id' => $user->id],
+            [
+                'full_name' => $request->full_name,
+                'gender' => $request->gender,
+                'birth_date' => $request->birth_date,
+                'birth_place' => $request->birth_place,
+                'marital_status' => $request->marital_status,
+                'spouse_name' => $request->spouse_name,
+                'number_of_children' => $request->children_count,
+                'residential_zone' => $request->zone,
+                'phone_number' => $request->phone,
+                'email' => $request->email,
+
+                'date_of_conversion' => $request->date_of_conversion,
+                'church_of_conversion' => $request->church_of_conversion,
+                'baptism_date' => $request->baptism_date,
+                'baptism_place' => $request->baptism_place,
+                'baptizer_name' => $request->baptizer_name,
+                'baptizer_title' => $request->baptizer_title,
+                'previous_church' => $request->previous_church,
+                'church_service' => $request->church_service,
+                'service_duration' => $request->service_duration,
+
+                'education_level' => $request->education_level,
+                'profession' => $request->profession,
+                'occupation' => $request->occupation,
+                'work_place' => $request->work_place,
+                'work_contact' => $request->work_contact,
+
+                'lives_alone' => $request->lives_alone,
+                'lives_with' => $request->lives_with,
+            ]
+        );
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Profile updated successfully.',
+            'member' => $member,
+        ]);
+    }
+
+    public function login(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email',
+            'password' => 'required|string',
+        ]);
+
+        if (!Auth::attempt($request->only('email', 'password'))) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Invalid credentials',
+            ], 401);
+        }
+
+        $user = Auth::user();
+
+        if (!$user->role) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Asante kwa kujisajili. Maombi yako yanahitaji kuidhinishwa na uongozi wa kanisa.
+Tutakujulisha mara tu utakapokubalika.',
+            ], 403);
+        }
+
+        $token = $user->createToken('auth_token')->plainTextToken;
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Login successful',
+            'token' => $token,
+            'user' => $user,
+        ]);
+    }
+
+    public function changePassword(Request $request)
+    {
+        $request->validate([
+            'current_password' => 'required|string',
+            'new_password' => 'required|string|min:6|confirmed',
+        ]);
+
+        if (!Hash::check($request->current_password, $request->user()->password)) {
+            return response()->json(['status' => 'error', 'message' => 'Current password is incorrect.'], 400);
+        }
+
+        $request->user()->update([
+            'password' => Hash::make($request->new_password),
+        ]);
+
+        return response()->json(['status' => 'success', 'message' => 'Password changed successfully.']);
+    }
+
+    public function logout(Request $request)
+    {
+        $request->user()->currentAccessToken()->delete();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Logged out successfully',
+        ]);
+    }
+
+    public function me(Request $request)
+    {
+        $user = $request->user();
+        $member = Member::with(['user', 'groups'])->where('user_id', $user->id)->first();
+
+        return response()->json([
+            'status' => 'success',
+            'member' => $member,
+        ]);
+    }
+
+    public function allUsers()
+    {
+        try {
+            $members = Member::with(['user', 'groups'])->get();
+
+            $users = $members->map(function ($member) {
+                $user = $member->user;
+
+                return [
+                    'id' => $user->id,
+                    'full_name' => $member->full_name ?? $user->full_name,
+                    'email' => $member->email ?? $user->email,
+                    'phone' => $member->phone_number ?? $user->phone,
+                    'gender' => $member->gender ?? $user->gender,
+                    'birth_date' => $member->birth_date ?? $user->birth_date,
+                    'birth_place' => $member->birth_place ?? $user->birth_place,
+                    'role' => $user->role,
+                    'created_at' => $user->created_at,
+                    'member_id' => $member->id,
+                    'membership_status' => $member->membership_status,
+                    'membership_number' => $member->membership_number,
+                    'deactivation_reason' => $member->deactivation_reason,
+                    'groups' => $member->groups->map(fn ($group) => [
+                        'id' => $group->id,
+                        'name' => $group->name,
+                    ]),
+                ];
+            });
+
+            $nonMembers = User::doesntHave('member')->get()->map(function ($user) {
+                return [
+                    'id' => $user->id,
+                    'full_name' => $user->full_name,
+                    'email' => $user->email,
+                    'phone' => $user->phone,
+                    'gender' => $user->gender,
+                    'birth_date' => $user->birth_date,
+                    'birth_place' => $user->birth_place,
+                    'role' => $user->role,
+                    'created_at' => $user->created_at,
+                    'member_id' => null,
+                    'membership_status' => null,
+                    'deactivation_reason' => null,
+                    'groups' => [],
+                ];
+            });
+
+            return response()->json([
+                'status' => 'success',
+                'users' => $users->merge($nonMembers),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Server error: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+}
