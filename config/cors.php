@@ -14,7 +14,7 @@ return [
 
     'allowed_origins' => [
         'https://churchapp.co.tz',
-        'http://localhost:3000',
+        'https://fpctchamwino.kanisasoft.co.tz',
     ],
 
     'allowed_origins_patterns' => [],
