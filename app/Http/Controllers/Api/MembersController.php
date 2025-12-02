@@ -2,17 +2,25 @@
 
 namespace App\Http\Controllers\Api;
 
-use Illuminate\Support\Facades\Hash;
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
+use App\Mail\MemberAuthorizedMail;
+use App\Models\DeletedMember;
+use App\Models\LeadershipRole;
 use App\Models\Member;
 use App\Models\User;
-use App\Models\DeletedMember;
-use Illuminate\Support\Facades\Validator;
+use App\Services\SMSService;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Validator;
 
 class MembersController extends Controller
 {
+    /**
+     * List all members
+     */
     public function index()
     {
         return response()->json([
@@ -21,9 +29,13 @@ class MembersController extends Controller
         ]);
     }
 
+    /**
+     * Show a specific member
+     */
     public function show($id)
     {
         $member = Member::with('user')->find($id);
+
         if (!$member) {
             return response()->json(['status' => 'error', 'message' => 'Member not found'], 404);
         }
@@ -31,6 +43,9 @@ class MembersController extends Controller
         return response()->json(['status' => 'success', 'member' => $member]);
     }
 
+    /**
+     * Create a new member and user
+     */
     public function store(Request $request)
     {
         $request->merge([
@@ -66,46 +81,47 @@ class MembersController extends Controller
             DB::beginTransaction();
 
             $user = User::create([
-                'full_name'     => $request->full_name,
-                'gender'        => $request->gender,
-                'birth_date'    => $request->birth_date,
-                'birth_place'   => $request->birth_place,
-                'marital_status'=> $request->marital_status,
-                'spouse_name'   => $request->spouse_name,
-                'children_count'=> $request->number_of_children,
-                'zone'          => $request->residential_zone,
-                'phone'         => $request->phone_number,
-                'email'         => $request->email,
-                'password'      => Hash::make('defaultpassword'),
-                'role'          => 'mshirika',
+                'full_name' => $request->full_name,
+                'gender' => $request->gender,
+                'birth_date' => $request->birth_date,
+                'birth_place' => $request->birth_place,
+                'marital_status' => $request->marital_status,
+                'spouse_name' => $request->spouse_name,
+                'children_count' => $request->number_of_children,
+                'zone' => $request->residential_zone,
+                'phone' => $request->phone_number,
+                'email' => $request->email,
+                'password' => Hash::make('defaultpassword'),
+                'role' => 'mshirika',
             ]);
 
-            // ✅ Generate unique membership number
             $membershipNumber = $this->generateMembershipNumber();
 
             $member = Member::create([
-                'user_id'           => $user->id,
-                'full_name'         => $request->full_name,
-                'gender'            => $request->gender,
-                'birth_date'        => $request->birth_date,
-                'birth_place'       => $request->birth_place,
-                'marital_status'    => $request->marital_status,
-                'spouse_name'       => $request->spouse_name,
-                'number_of_children'=> $request->number_of_children,
-                'residential_zone'  => $request->residential_zone,
-                'phone_number'      => $request->phone_number,
-                'email'             => $request->email,
+                'user_id' => $user->id,
+                'full_name' => $request->full_name,
+                'gender' => $request->gender,
+                'birth_date' => $request->birth_date,
+                'birth_place' => $request->birth_place,
+                'marital_status' => $request->marital_status,
+                'spouse_name' => $request->spouse_name,
+                'number_of_children' => $request->number_of_children,
+                'residential_zone' => $request->residential_zone,
+                'phone_number' => $request->phone_number,
+                'email' => $request->email,
                 'membership_status' => 'active',
                 'membership_number' => $membershipNumber,
             ]);
 
             DB::commit();
 
+            $this->notifyMember($member);
+
             return response()->json([
                 'status' => 'success',
                 'message' => 'Member and user created successfully',
                 'member' => $member,
-                'user'   => $user,
+                'user' => $user,
             ], 201);
 
         } catch (\Throwable $e) {
@@ -117,6 +133,9 @@ class MembersController extends Controller
         }
     }
 
+    /**
+     * Authorize an existing user as a member
+     */
     public function authorizeUser(Request $request)
     {
         $request->validate([
@@ -135,52 +154,68 @@ class MembersController extends Controller
                 ]);
             }
 
+            $member = $user->member;
+        } else {
+            $membershipNumber = $this->generateMembershipNumber();
+
+            $member = Member::create([
+                'user_id' => $user->id,
+                'full_name' => $user->full_name,
+                'gender' => $user->gender,
+                'birth_date' => $user->birth_date,
+                'birth_place' => $user->birth_place,
+                'marital_status' => $user->marital_status,
+                'spouse_name' => $user->spouse_name,
+                'number_of_children' => $user->children_count,
+                'residential_zone' => $user->zone,
+                'phone_number' => $user->phone,
+                'email' => $user->email,
+                'membership_status' => 'active',
+                'membership_number' => $membershipNumber,
+            ]);
+
+            $user->role = 'mshirika';
+            $user->save();
+        }
+
+        $this->notifyMember($member);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'User authorized as member successfully, notifications sent.',
+            'member' => $member,
+            'user' => $user,
+        ]);
+    }
+
+    /**
+     * Activate member
+     */
+    public function activate(Member $member)
+    {
+        if ($member->membership_status === 'active') {
             return response()->json([
-                'status'  => 'success',
-                'message' => 'User already had a member profile. Role updated to mshirika.',
-                'member'  => $user->member,
-                'user'    => $user,
+                'status' => 'info',
+                'message' => 'Member already active.',
             ]);
         }
 
-        $membershipNumber = $this->generateMembershipNumber();
-
-        $member = Member::create([
-            'user_id'            => $user->id,
-            'full_name'          => $user->full_name,
-            'gender'             => $user->gender,
-            'birth_date'         => $user->birth_date,
-            'birth_place'        => $user->birth_place,
-            'marital_status'     => $user->marital_status,
-            'spouse_name'        => $user->spouse_name,
-            'number_of_children' => $user->children_count,
-            'residential_zone'   => $user->zone,
-            'phone_number'       => $user->phone,
-            'email'              => $user->email,
-            'membership_status'  => 'active',
-            'membership_number'  => $membershipNumber,
+        $member->update([
+            'membership_status' => 'active',
+            'deactivation_reason' => null,
         ]);
 
-        $user->role = 'mshirika';
-        $user->save();
+        $this->notifyMember($member);
 
         return response()->json([
-            'status'  => 'success',
-            'message' => 'User authorized as member successfully.',
-            'member'  => $member,
-            'user'    => $user,
+            'status' => 'success',
+            'message' => 'Member activated and notifications sent.',
         ]);
     }
 
-    private function generateMembershipNumber()
-    {
-        // 🔒 Use MAX to ensure uniqueness
-        $lastNumber = Member::max(DB::raw('CAST(membership_number AS UNSIGNED)'));
-        $newNumber = $lastNumber ? $lastNumber + 1 : 1;
-
-        return str_pad($newNumber, 4, '0', STR_PAD_LEFT);
-    }
-
+    /**
+     * Deactivate member
+     */
     public function deactivate(Request $request, Member $member)
     {
         $request->validate([
@@ -206,93 +241,76 @@ class MembersController extends Controller
         ]);
     }
 
-    public function activate(Member $member)
+    /**
+     * List deleted members
+     */
+    public function deleted()
     {
-        $member->update([
-            'membership_status' => 'active',
-            'deactivation_reason' => null, // ✅ Optional: clear deactivation reason
-        ]);
-
         return response()->json([
             'status' => 'success',
-            'message' => 'Member reactivated successfully.',
+            'deleted_members' => DeletedMember::latest()->get(),
         ]);
     }
 
-        public function deleted()
-    {
-        try {
-            return response()->json([
-                'status' => 'success',
-                'deleted_members' => DeletedMember::latest()->get()
-            ]);
-        } catch (\Throwable $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Error loading deleted members: ' . $e->getMessage(),
-            ], 500);
-        }
-    }
-
+    /**
+     * Restore a deleted member
+     */
     public function restore($id)
     {
         $record = DeletedMember::find($id);
+
         if (!$record) {
             return response()->json(['status' => 'error', 'message' => 'Deleted member not found'], 404);
         }
 
-        // Restore logic - you can modify this as needed
         $restored = Member::create([
-            'user_id'           => $record->user_id,
-            'full_name'         => $record->full_name,
-            'gender'            => $record->gender,
-            'birth_date'        => $record->birth_date,
-            'phone_number'      => $record->phone,
-            'email'             => $record->email,
+            'user_id' => $record->user_id,
+            'full_name' => $record->full_name,
+            'gender' => $record->gender,
+            'birth_date' => $record->birth_date,
+            'phone_number' => $record->phone,
+            'email' => $record->email,
             'membership_status' => 'active',
-            'is_authorized'     => true,
         ]);
 
         DeletedMember::destroy($id);
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Deleted member restored',
-            'member' => $restored
+            'message' => 'Member restored successfully.',
+            'member' => $restored,
         ]);
     }
-    
+
+    /**
+     * Delete member and user
+     */
     public function deleteBoth($id)
     {
         $member = Member::find($id);
-    
+
         if (!$member) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Member not found',
-            ], 404);
+            return response()->json(['status' => 'error', 'message' => 'Member not found'], 404);
         }
-    
+
         try {
             $user = $member->user;
-    
-            // Backup to DeletedMembers (optional)
+
             DeletedMember::create([
-                'user_id'     => $user->id,
-                'full_name'   => $member->full_name,
-                'email'       => $member->email,
-                'phone'       => $member->phone_number,
-                'gender'      => $member->gender,
-                'birth_date'  => $member->birth_date,
-                'reason'      => 'deleted manually',
-                'deleted_by'  => auth()->user()->full_name ?? 'system',
-                'deleted_at'  => now(),
+                'user_id' => $user->id,
+                'full_name' => $member->full_name,
+                'email' => $member->email,
+                'phone' => $member->phone_number,
+                'gender' => $member->gender,
+                'birth_date' => $member->birth_date,
+                'reason' => 'deleted manually',
+                'deleted_by' => auth()->user()->full_name ?? 'system',
+                'deleted_at' => now(),
             ]);
-    
-            // Delete both records
+
             $member->delete();
             $user->delete();
-    
+
             return response()->json([
                 'status' => 'success',
                 'message' => 'Member and user deleted successfully',
@@ -304,7 +322,10 @@ class MembersController extends Controller
             ], 500);
         }
     }
-    
+
+    /**
+     * Assign leadership role
+     */
     public function assignLeadershipRole(Request $request)
     {
         $request->validate([
@@ -312,15 +333,13 @@ class MembersController extends Controller
             'role_title' => 'required|string|exists:leadership_roles,title',
         ]);
 
-        // Get user and role
         $user = User::find($request->user_id);
-        $role = \App\Models\LeadershipRole::where('title', $request->role_title)->first();
+        $role = LeadershipRole::where('title', $request->role_title)->first();
 
         if (!$role) {
             return response()->json(['status' => 'error', 'message' => 'Role not found.'], 404);
         }
 
-        // Update user's role_id and role string (for legacy support)
         $user->role_id = $role->id;
         $user->role = $role->title;
         $user->save();
@@ -331,5 +350,57 @@ class MembersController extends Controller
             'user' => $user,
         ]);
     }
+
+    /**
+     * Generate unique membership number
+     */
+    private function generateMembershipNumber()
+    {
+        $lastNumber = Member::max(DB::raw('CAST(membership_number AS UNSIGNED)'));
+        $newNumber = $lastNumber ? $lastNumber + 1 : 1;
+
+        return str_pad($newNumber, 4, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Notify member via SMS and Email
+     */
+ private function notifyMember(Member $member)
+{
+    // Refresh member to get latest data
+    $member = $member->fresh();
+
+    // If membership number is missing, generate and save it
+    if (!$member->membership_number) {
+        $member->membership_number = $this->generateMembershipNumber();
+        $member->save();
+    }
+
+    $membershipNumber = $member->membership_number;
+    $fullName = $member->full_name;
+
+    // Send SMS
+    if ($member->phone_number) {
+        try {
+            $text = "Habari {$fullName}, ushirika wako umeidhinishwa. "
+                  . "Namba yako ya ushirika ni: {$membershipNumber}. Karibu!";
+            app(SMSService::class)->sendSMS($member->phone_number, $text);
+        } catch (\Throwable $e) {
+            Log::error("SMS sending failed: " . $e->getMessage());
+        }
+    }
+
+    // Send Email
+    if ($member->email) {
+        try {
+            Mail::to($member->email)->send(
+                new MemberAuthorizedMail($fullName, $membershipNumber)
+            );
+        } catch (\Throwable $e) {
+            Log::error("Email sending failed: " . $e->getMessage());
+        }
+    }
+}
+
 
 }

@@ -35,10 +35,19 @@ return [
         ],
     ],
 
-    'beem' => [
-    'api_key' => env('BEEM_API_KEY'),
-    'secret' => env('BEEM_SECRET_KEY'),
-    'sender' => env('BEEM_SENDER_NAME'),
-    ],
+    // 'beem' => [
+    // 'api_key' => env('BEEM_API_KEY'),
+    // 'secret' => env('BEEM_SECRET_KEY'),
+    // 'sender' => env('BEEM_SENDER_NAME'),
+    // ],
+
+    'mshastra' => [
+    'user' => env('MSHASTRA_USER'),
+    'password' => env('MSHASTRA_PASSWORD'),
+    'sender' => env('MSHASTRA_SENDERID'),
+    'base_url' => env('MSHASTRA_BASE_URL'),
+    'json_url' => env('MSHASTRA_JSON_URL'),
+],
+
 
 ];

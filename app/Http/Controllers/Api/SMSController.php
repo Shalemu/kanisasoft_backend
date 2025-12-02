@@ -3,157 +3,199 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
+use App\Mail\MemberAuthorizedMail;
 use App\Models\User;
+use App\Models\Member;
 use App\Models\Group;
 use App\Models\SmsLog;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class SMSController extends Controller
 {
+    /**
+     * Send SMS (via GET API) and optional Email
+     */
     public function send(Request $request)
     {
         $request->validate([
-            'type' => 'required|string',
+            'type' => 'nullable|string',       // all, male, female, group, individual
+            'receiver' => 'nullable|string',   // group name or individual name/phone
             'message' => 'required|string',
+            'phone' => 'nullable|string',      // direct phone
+            'email' => 'nullable|email',       // direct email
+            'name' => 'nullable|string',       // name for direct notification
+            'send_email' => 'nullable|boolean',// send email if true
         ]);
 
         $type = $request->type;
-        $message = $request->message;
         $receiver = $request->receiver;
-        $recipients = [];
+        $message = $request->message;
+        $directPhone = $request->phone;
+        $directEmail = $request->email;
+        $name = $request->name ?? 'Recipient';
+        $sendEmail = $request->send_email ?? false;
 
-        switch ($type) {
-            case 'all':
-                $recipients = User::pluck('phone')->toArray();
-                break;
+        $recipients = collect();
 
-            case 'male':
-            case 'M':
-                $recipients = User::where('gender', 'M')->pluck('phone')->toArray();
-                break;
-
-            case 'female':
-            case 'F':
-                $recipients = User::where('gender', 'F')->pluck('phone')->toArray();
-                break;
-
-            case 'group':
-                $group = Group::where('name', $receiver)->first();
-                if ($group) {
-                    $recipients = $group->members()->pluck('phone_number')->toArray();
-                }
-                break;
-
-            case 'individual':
-                $sanitizedReceiver = preg_replace('/[^0-9]/', '', $receiver);
-                if (preg_match('/^0\d{9}$/', $sanitizedReceiver)) {
-                    $sanitizedReceiver = '255' . substr($sanitizedReceiver, 1);
-                }
-                if (preg_match('/^255\d{9}$/', $sanitizedReceiver)) {
-                    $sanitizedReceiver = '+' . $sanitizedReceiver;
-                }
-
-                $user = User::where('full_name', $receiver)
-                    ->orWhereRaw("REPLACE(REPLACE(REPLACE(phone, '+', ''), ' ', ''), '-', '') = ?", [ltrim($sanitizedReceiver, '+')])
-                    ->first();
-
-                if ($user) {
-                    $recipients = [$user->phone];
-                }
-                break;
-
-            default:
-                Log::warning("Invalid SMS type provided: $type");
-                return response()->json([
-                    'status' => 'error',
-                    'message' => 'Invalid type provided.',
-                ], 422);
+        // Direct send: if phone/email provided, skip type lookup
+        if ($directPhone || $directEmail) {
+            $recipients->push((object)[
+                'phone' => $directPhone,
+                'email' => $directEmail,
+                'name' => $name
+            ]);
+        } else {
+            // Lookup recipients by type
+            switch (strtolower($type)) {
+                case 'all':
+                    $recipients = User::all();
+                    break;
+                case 'male':
+                case 'm':
+                    $recipients = User::where('gender', 'M')->get();
+                    break;
+                case 'female':
+                case 'f':
+                    $recipients = User::where('gender', 'F')->get();
+                    break;
+                case 'group':
+                    $group = Group::where('name', $receiver)->first();
+                    if ($group) {
+                        $recipients = $group->members()->get();
+                    }
+                    break;
+                case 'individual':
+                    $user = User::where('full_name', $receiver)
+                        ->orWhere('phone', $receiver)
+                        ->first();
+                    if ($user) {
+                        $recipients = collect([$user]);
+                    }
+                    break;
+                default:
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'Invalid type provided or no direct phone/email.'
+                    ], 422);
+            }
         }
 
-        if (empty($recipients)) {
-            Log::warning("No recipients found for type: $type, receiver: $receiver");
+        if ($recipients->isEmpty()) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'No recipients found.',
+                'message' => 'No recipients found.'
             ], 400);
         }
 
-        $uniqueRecipients = collect($recipients)->map(function ($num) {
-            $cleaned = preg_replace('/[^0-9+]/', '', $num);
-            if (preg_match('/^0\d{9}$/', $cleaned)) {
-                $cleaned = '+255' . substr($cleaned, 1);
-            }
-            if (preg_match('/^255\d{9}$/', $cleaned)) {
-                $cleaned = '+' . $cleaned;
-            }
-            return $cleaned;
-        })->unique()->values()->all();
+        $smsResults = [];
+        $emailResults = [];
 
-        Log::info('Sending SMS to: ' . json_encode($uniqueRecipients));
+        foreach ($recipients as $recipient) {
+            $recipientName = $recipient->name ?? $recipient->full_name ?? 'Recipient';
+            $recipientPhone = $recipient->phone ?? $recipient->phone_number ?? null;
+            $recipientEmail = $recipient->email ?? null;
 
-        $payload = [
-            'source_addr' => config('services.beem.sender'),
-            'encoding' => 0,
-            'schedule_time' => '',
-            'message' => $message,
-            'recipients' => array_map(function ($phone) {
-                return [
-                    'recipient_id' => preg_replace('/[^0-9]/', '', $phone),
-                    'dest_addr' => $phone,
-                ];
-            }, $uniqueRecipients),
-        ];
+            // Send SMS via GET API
+            if ($recipientPhone) {
+    try {
+        $num = preg_replace('/\D/', '', $recipientPhone);
+        $lastNine = substr($num, -9);
+        $formattedPhone = '255' . $lastNine;
 
-        Log::info('Beem Payload: ' . json_encode($payload));
+        // URL-encode message
+        $msgEncoded = urlencode($message);
 
-        try {
-            $apiKey = trim(config('services.beem.api_key'));
-            $secretKey = trim(config('services.beem.secret'));
+        // Build GET URL
+        $url = "https://mshastra.com/sendurl.aspx?"
+            . "user=" . config('services.mshastra.user')
+            . "&pwd=" . config('services.mshastra.password')
+            . "&senderid=" . config('services.mshastra.sender')
+            . "&mobileno=" . $formattedPhone
+            . "&msgtext=" . $msgEncoded
+            . "&CountryCode=255";
 
-            Log::info('BEEM_API_KEY: ' . $apiKey);
-            Log::info('BEEM_SECRET_KEY: ' . $secretKey);
+        $response = Http::get($url);
+        $body = $response->body();
 
-            $authorization = 'Basic ' . base64_encode($apiKey . ':' . $secretKey);
-            Log::info('Beem Auth Header: ' . $authorization);
-
-            $response = Http::withOptions(['verify' => true])
-                ->withHeaders([
-                    'Content-Type' => 'application/json',
-                    'Authorization' => $authorization,
-                ])
-                ->post('https://apisms.beem.africa/v1/send', $payload);
-
-            $responseData = $response->json();
-            Log::info('Beem Response: ', $responseData);
-
-            foreach ($uniqueRecipients as $recipient) {
-                SmsLog::create([
-                    'recipient' => $recipient,
-                    'receiver' => $receiver,
-                    'type' => $type,
-                    'message' => $message,
-                    'status' => $responseData['message'] ?? 'sent',
-                    'response' => $responseData,
-                ]);
-            }
-
-            return response()->json([
-                'status' => 'success',
-                'sent' => count($uniqueRecipients),
-                'beem_response' => $responseData,
-            ]);
-        } catch (\Exception $e) {
-            Log::error('SMS sending failed: ' . $e->getMessage());
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Failed to send SMS.',
-                'error' => $e->getMessage(),
-            ], 500);
+        // Check response for success
+        if (stripos($body, 'success') !== false || stripos($body, 'Sent') !== false) {
+            $smsStatus = 'Sent';
+        } else {
+            $smsStatus = 'Failed: ' . $body;
         }
+
+        $smsResults[$recipientName] = $smsStatus;
+
+        // Log SMS
+        SmsLog::create([
+            'recipient' => $formattedPhone,
+            'receiver' => $receiver ?? $recipientName,
+            'type' => $type ?? 'direct',
+            'message' => $message,
+            'status' => $smsStatus,
+            'response' => $body,
+        ]);
+
+    } catch (\Exception $e) {
+        Log::error("SMS failed for {$recipientPhone}: " . $e->getMessage());
+        $smsResults[$recipientName] = 'Failed: ' . $e->getMessage();
+    }
+}
+
+            // Send Email if requested
+            if ($sendEmail && $recipientEmail) {
+                try {
+                    $member = Member::where('email', $recipientEmail)
+                        ->orWhere('phone_number', $recipientPhone)
+                        ->first();
+
+                    $membershipNumber = 'N/A';
+
+                    if ($member) {
+                        if (!$member->membership_number) {
+                            $member->membership_number = $this->generateMembershipNumber();
+                            $member->save();
+                        }
+                        $membershipNumber = $member->membership_number;
+                    }
+
+                    Mail::to($recipientEmail)->send(
+                        new MemberAuthorizedMail($recipientName, $membershipNumber)
+                    );
+
+                    $emailResults[$recipientName] = 'Sent';
+                } catch (\Exception $e) {
+                    Log::error("Email failed for {$recipientEmail}: " . $e->getMessage());
+                    $emailResults[$recipientName] = 'Failed: ' . $e->getMessage();
+                }
+            }
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Notifications processed',
+            'sms_results' => $smsResults,
+            'email_results' => $emailResults,
+        ]);
     }
 
+    /**
+     * Generate unique membership number
+     */
+    private function generateMembershipNumber()
+    {
+        $lastNumber = Member::max(DB::raw('CAST(membership_number AS UNSIGNED)'));
+        $newNumber = $lastNumber ? $lastNumber + 1 : 1;
+        return str_pad($newNumber, 4, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Retrieve SMS logs
+     */
     public function logs()
     {
         $logs = SmsLog::latest()->limit(100)->get()->map(function ($log) {
