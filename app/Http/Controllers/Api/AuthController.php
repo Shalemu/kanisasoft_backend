@@ -11,14 +11,46 @@ use App\Models\Member;
 
 class AuthController extends Controller
 {
+    /**
+     * Convert any format to Tanzania standard: 255XXXXXXXXX
+     */
+    private function formatTanzaniaPhone($phone)
+    {
+        // Remove non-numeric characters
+        $num = preg_replace('/\D/', '', $phone);
+
+        // If starts with 0 -> remove it
+        if (str_starts_with($num, '0')) {
+            $num = substr($num, 1);
+        }
+
+        // If already 255XXXXXXXXX -> return as is
+        if (str_starts_with($num, '255')) {
+            return $num;
+        }
+
+        // If 9 digits (like 767983236)
+        if (strlen($num) === 9) {
+            return '255' . $num;
+        }
+
+        // Last fallback
+        return $num;
+    }
+
+    /**
+     * REGISTER USER
+     */
     public function register(Request $request)
     {
+        // Convert gender & phone before validation
         $request->merge([
             'gender' => match ($request->gender) {
                 'Mwanaume' => 'M',
                 'Mwanamke' => 'F',
                 default => $request->gender,
             },
+            'phone' => $this->formatTanzaniaPhone($request->phone),
         ]);
 
         $request->validate([
@@ -124,6 +156,9 @@ class AuthController extends Controller
         }
     }
 
+    /**
+     * UPDATE PROFILE
+     */
     public function updateProfile(Request $request)
     {
         $request->validate([
@@ -161,10 +196,12 @@ class AuthController extends Controller
             'lives_with' => 'nullable|string',
         ]);
 
+        $formattedPhone = $this->formatTanzaniaPhone($request->phone);
+
         $user = $request->user();
         $user->update([
             'full_name' => $request->full_name,
-            'phone' => $request->phone,
+            'phone' => $formattedPhone,
             'email' => $request->email,
         ]);
 
@@ -179,7 +216,7 @@ class AuthController extends Controller
                 'spouse_name' => $request->spouse_name,
                 'number_of_children' => $request->children_count,
                 'residential_zone' => $request->zone,
-                'phone_number' => $request->phone,
+                'phone_number' => $formattedPhone,
                 'email' => $request->email,
 
                 'date_of_conversion' => $request->date_of_conversion,
@@ -210,6 +247,9 @@ class AuthController extends Controller
         ]);
     }
 
+    /**
+     * LOGIN
+     */
     public function login(Request $request)
     {
         $request->validate([
@@ -229,8 +269,7 @@ class AuthController extends Controller
         if (!$user->role) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Asante kwa kujisajili. Maombi yako yanahitaji kuidhinishwa na uongozi wa kanisa.
-Tutakujulisha mara tu utakapokubalika.',
+                'message' => 'Asante kwa kujisajili. Maombi yako yanahitaji kuidhinishwa na uongozi wa kanisa. Tutakujulisha mara tu utakapokubalika.',
             ], 403);
         }
 
@@ -244,6 +283,9 @@ Tutakujulisha mara tu utakapokubalika.',
         ]);
     }
 
+    /**
+     * CHANGE PASSWORD
+     */
     public function changePassword(Request $request)
     {
         $request->validate([
@@ -262,6 +304,9 @@ Tutakujulisha mara tu utakapokubalika.',
         return response()->json(['status' => 'success', 'message' => 'Password changed successfully.']);
     }
 
+    /**
+     * LOGOUT
+     */
     public function logout(Request $request)
     {
         $request->user()->currentAccessToken()->delete();
@@ -272,6 +317,9 @@ Tutakujulisha mara tu utakapokubalika.',
         ]);
     }
 
+    /**
+     * ME
+     */
     public function me(Request $request)
     {
         $user = $request->user();
@@ -283,6 +331,9 @@ Tutakujulisha mara tu utakapokubalika.',
         ]);
     }
 
+    /**
+     * ALL USERS
+     */
     public function allUsers()
     {
         try {
@@ -342,3 +393,4 @@ Tutakujulisha mara tu utakapokubalika.',
         }
     }
 }
+
