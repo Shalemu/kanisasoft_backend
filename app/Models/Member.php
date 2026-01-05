@@ -62,6 +62,13 @@ class Member extends Model
         'is_authorized',
     ];
 
+
+    protected function serializeDate(\DateTimeInterface $date)
+{
+    return $date->format('Y-m-d');
+}
+
+
     protected $casts = [
         'birth_date' => 'date',
         'date_of_conversion' => 'date',

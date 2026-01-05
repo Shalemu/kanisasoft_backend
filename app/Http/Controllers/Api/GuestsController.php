@@ -46,7 +46,7 @@ class GuestsController extends Controller
             'full_name'     => $request->full_name,
             'phone'         => $request->phone,
             'church_origin' => $request->church_origin,
-            'visit_date'    => $request->visit_date ?? now()->toDateString(), // ✅ default today
+            'visit_date'    => $request->visit_date ?? now()->toDateString(), 
             'prayer'        => $request->prayer ?? false,
             'salvation'     => $request->salvation ?? false,
             'joining'       => $request->joining ?? false,
