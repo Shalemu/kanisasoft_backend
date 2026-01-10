@@ -9,7 +9,10 @@ class ResetPasswordNotification extends BaseResetPassword
 {
     public function toMail($notifiable)
     {
-        $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000'); // fallback if not set
+ 
+        // fallback if not set
+        //  $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000'); 
+        $frontendUrl = env('FRONTEND_URL', 'https://fpctkurasini.kanisasoft.co.tz/'); 
 
         return (new MailMessage)
             ->subject('Reset Your Password')
