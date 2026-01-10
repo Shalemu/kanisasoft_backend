@@ -382,8 +382,10 @@ class MembersController extends Controller
     // Send SMS
     if ($member->phone_number) {
         try {
-            $text = "Habari {$fullName}, ushirika wako umeidhinishwa. "
-                  . "Namba yako ya ushirika ni: {$membershipNumber}. Karibu!";
+            $text = "Habari {$fullName}, usajili wako FPCT Kurasini umekamilika. "
+                  . "Namba yako ya ushirika ni: {$membershipNumber}. Karibu FPCT Kurasini.";
+
+              
             app(SMSService::class)->sendSMS($member->phone_number, $text);
         } catch (\Throwable $e) {
             Log::error("SMS sending failed: " . $e->getMessage());

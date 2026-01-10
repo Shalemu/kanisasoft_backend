@@ -8,6 +8,13 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
 use App\Models\Member;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Str;
+use App\Notifications\NewUserRegistered;
+use Illuminate\Support\Facades\Validator;
+
+
+
 
 class AuthController extends Controller
 {
@@ -140,6 +147,18 @@ class AuthController extends Controller
                 'membership_status' => 'active',
             ]);
 
+                    // Notify admins
+        $notificationStatus = [];
+        $admins = User::where('role', 'admin')->get();
+        foreach ($admins as $admin) {
+            try {
+                $admin->notify(new NewUserRegistered($user));
+                $notificationStatus[$admin->email] = 'sent';
+            } catch (\Throwable $ex) {
+                $notificationStatus[$admin->email] = 'failed: ' . $ex->getMessage();
+            }
+        }
+
             $token = $user->createToken('auth_token')->plainTextToken;
 
             return response()->json([
@@ -156,45 +175,51 @@ class AuthController extends Controller
         }
     }
 
+
+    
+
+
+
     /**
      * UPDATE PROFILE
      */
     public function updateProfile(Request $request)
     {
-        $request->validate([
-            'full_name' => 'required|string|max:255',
-            'gender' => 'required|in:M,F',
-            'birth_date' => 'nullable|date',
-            'birth_place' => 'nullable|string|max:255',
-            'marital_status' => 'nullable|in:Ameoa,Ameolewa,Hajaoa,Hajaolewa,Mjane,Mgane',
-            'spouse_name' => 'nullable|string|required_if:marital_status,Ameoa,Ameolewa',
-            'children_count' => 'nullable|integer|min:0',
-            'zone' => 'nullable|string|max:255',
-            'phone' => 'required|string|max:20',
-            'email' => 'required|email|max:255',
+       $request->validate([
+    'full_name' => 'required|string|max:255',
+    'gender' => 'required|in:M,F',
+    'birth_date' => 'nullable|date',
+    'birth_place' => 'nullable|string|max:255',
+    'marital_status' => 'nullable|in:Ameoa,Ameolewa,Hajaoa,Hajaolewa,Mjane,Mgane',
+    'spouse_name' => 'sometimes|required_if:marital_status,Ameoa,Ameolewa|string|max:255',
+    'children_count' => 'nullable|integer|min:0',
+    'zone' => 'nullable|string|max:255',
+    'phone' => 'required|string|max:20|unique:users,phone',
+    'email' => 'required|email|max:255|unique:users,email',
+    'password' => 'required|string|min:6|confirmed',
 
-            // Imani
-            'date_of_conversion' => 'nullable|date',
-            'church_of_conversion' => 'nullable|string',
-            'baptism_date' => 'nullable|date',
-            'baptism_place' => 'nullable|string',
-            'baptizer_name' => 'nullable|string',
-            'baptizer_title' => 'nullable|string',
-            'previous_church' => 'nullable|string',
-            'church_service' => 'nullable|string',
-            'service_duration' => 'nullable|string',
+    // Imani
+    'date_of_conversion' => 'nullable|date',
+    'church_of_conversion' => 'nullable|string',
+    'baptism_date' => 'nullable|date',
+    'baptism_place' => 'nullable|string',
+    'baptizer_name' => 'nullable|string',
+    'baptizer_title' => 'nullable|string',
+    'previous_church' => 'nullable|string',
+    'church_service' => 'nullable|string',
+    'service_duration' => 'nullable|string',
 
-            // Elimu
-            'education_level' => 'nullable|string',
-            'profession' => 'nullable|string',
-            'occupation' => 'nullable|string',
-            'work_place' => 'nullable|string',
-            'work_contact' => 'nullable|string',
+    // Elimu
+    'education_level' => 'nullable|string',
+    'profession' => 'nullable|string',
+    'occupation' => 'nullable|string',
+    'work_place' => 'nullable|string',
+    'work_contact' => 'nullable|string',
 
-            // Familia
-            'lives_alone' => 'nullable|boolean',
-            'lives_with' => 'nullable|string',
-        ]);
+    // Familia
+    'lives_alone' => 'nullable|boolean',
+    'lives_with' => 'nullable|string',
+]);
 
         $formattedPhone = $this->formatTanzaniaPhone($request->phone);
 
@@ -353,6 +378,10 @@ class AuthController extends Controller
                     'role' => $user->role,
                     'created_at' => $user->created_at,
                     'member_id' => $member->id,
+                     'residential_zone' =>
+                    $member->residential_zone
+                    ?? $user->zone
+                    ?? null,
                     'membership_status' => $member->membership_status,
                     'membership_number' => $member->membership_number,
                     'deactivation_reason' => $member->deactivation_reason,
@@ -392,5 +421,68 @@ class AuthController extends Controller
             ], 500);
         }
     }
+
+
+    /**
+ * FORGOT PASSWORD
+ */
+public function forgotPassword(Request $request)
+{
+    $request->validate([
+        'email' => 'required|email|exists:users,email',
+    ]);
+
+    $status = Password::sendResetLink(
+        $request->only('email')
+    );
+
+    if ($status === Password::RESET_LINK_SENT) {
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Password reset link sent to your email.',
+        ]);
+    }
+
+    return response()->json([
+        'status' => 'error',
+        'message' => 'Unable to send reset link.',
+    ], 500);
+}
+
+
+/**
+ * RESET PASSWORD
+ */
+public function resetPassword(Request $request)
+{
+    $request->validate([
+        'token' => 'required',
+        'email' => 'required|email|exists:users,email',
+        'password' => 'required|string|min:6|confirmed',
+    ]);
+
+    $status = Password::reset(
+        $request->only('email', 'password', 'password_confirmation', 'token'),
+        function ($user, $password) {
+            $user->forceFill([
+                'password' => Hash::make($password),
+                'remember_token' => Str::random(60),
+            ])->save();
+        }
+    );
+
+    if ($status === Password::PASSWORD_RESET) {
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Password reset successfully.',
+        ]);
+    }
+
+    return response()->json([
+        'status' => 'error',
+        'message' => 'Invalid token or email.',
+    ], 400);
+}
+
 }
 

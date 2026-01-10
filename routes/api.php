@@ -23,6 +23,8 @@ use App\Http\Controllers\Api\{
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/change-password', [AuthController::class, 'changePassword'])->middleware('auth:sanctum');
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
 // 🖼️ Public access to gallery
 Route::get('/gallery', [GalleryController::class, 'index']);

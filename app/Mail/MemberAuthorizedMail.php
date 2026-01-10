@@ -42,7 +42,10 @@ class MemberAuthorizedMail extends Mailable
  public function build()
 {
     return $this->subject('Membership Authorized')
-      ->html("<p>Bwana Yesu asifiwe  {$this->fullName},Sasa wewe ni mshirika rasmi wa fpct kurasini Namba yako ya ushirika ni:  {$this->membershipNumber}</p>");
+
+
+
+      ->html("<p>Habari {$this->fullName},usajili wako FPCT Kurasini umekamilika. Namba yako ya ushirika ni {$this->membershipNumber} <br> Karibu FPCT Kurasini.</p>");
                 // ->html("<p>Hello {$this->fullName}, your membership number is {$this->membershipNumber}</p>");
 
                 
