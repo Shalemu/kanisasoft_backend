@@ -9,16 +9,17 @@ return new class extends Migration {
     {
         Schema::create('leaders', function (Blueprint $table) {
             $table->id();
-
+            $table->string('leader_code')->unique(); // Unique leader identifier
             $table->foreignId('leadership_role_id')->constrained('leadership_roles')->onDelete('cascade');
-            $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete(); // optional link to user
+            $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
 
-            $table->string('full_name');  // used if no user_id
+            $table->string('full_name');  
             $table->string('phone');
             $table->string('email')->nullable();
 
             $table->timestamps();
         });
+
     }
 
     public function down(): void

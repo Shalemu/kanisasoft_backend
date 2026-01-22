@@ -16,7 +16,8 @@ use App\Http\Controllers\Api\{
     AssetController,
     SMSController,
     GalleryController,
-    UserSettingsController
+    UserSettingsController,
+    UserRoleController,
 };
 
 // 🌐 Public routes
@@ -25,6 +26,9 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::post('/change-password', [AuthController::class, 'changePassword'])->middleware('auth:sanctum');
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+Route::middleware('auth:sanctum')->post('/users/assign-roles', [UserRoleController::class, 'assignRoles']);
+
+
 
 // 🖼️ Public access to gallery
 Route::get('/gallery', [GalleryController::class, 'index']);
@@ -68,6 +72,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/leadership-roles', [LeadershipRoleController::class, 'index']);
     Route::post('/leadership-roles', [LeadershipRoleController::class, 'store']);
     Route::post('/assign-leadership-role', [MembersController::class, 'assignLeadershipRole']);
+    Route::get('/user-role-assignments', [UserRoleController::class, 'index']);
+    Route::put('/leadership-roles/{id}', [LeadershipRoleController::class, 'update']);
+    Route::delete('/leadership-roles/{id}', [LeadershipRoleController::class, 'destroy']);
 
     // Events
     Route::apiResource('events', EventController::class);

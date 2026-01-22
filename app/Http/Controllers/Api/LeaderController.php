@@ -10,25 +10,28 @@ use App\Models\User;
 
 class LeaderController extends Controller
 {
+    /**
+     * List active leaders
+     */
     public function index()
     {
-        $leaders = Leader::with(['user', 'role'])
+        $leaders = Leader::with(['user', 'roles'])
             ->where('status', 'active')
-            ->orderByRaw('CASE WHEN user_id IS NULL THEN 0 ELSE 1 END')
+            ->orderByRaw('CASE WHEN user_id IS NULL THEN 0 ELSE 1 END DESC')
             ->latest()
             ->get();
 
-        $formatted = $leaders->map(function ($leader) {
-            return [
-                'id' => $leader->id,
-                'user_id' => $leader->user_id,
-                'name' => $leader->user->full_name ?? $leader->full_name,
-                'email' => $leader->user->email ?? $leader->email,
-                'phone' => $leader->user->phone ?? $leader->phone,
-                'role' => $leader->role->title ?? '—',
-                'status' => $leader->status,
-            ];
-        });
+ $formatted = $leaders->map(fn ($leader) => [
+    'id' => $leader->id,
+    'user_id' => $leader->user_id,
+    'name' => $leader->user->full_name ?? $leader->full_name,
+    'email' => $leader->user->email ?? $leader->email,
+    'phone' => $leader->user->phone ?? $leader->phone,
+    'roles' => $leader->roles->pluck('title'), // all roles
+    'role' => $leader->roles->first()?->title, // first role for sorting
+    'status' => $leader->status,
+]);
+
 
         return response()->json([
             'status' => 'success',
@@ -36,70 +39,152 @@ class LeaderController extends Controller
         ]);
     }
 
-    public function store(Request $request)
-    {
-        $validated = $request->validate([
-            'user_id' => 'nullable|exists:users,id',
-            'full_name' => 'required_without:user_id|string|max:255',
-            'phone' => 'required_without:user_id|string|max:20',
-            'email' => 'nullable|email|max:255',
-            'role_id' => 'required|exists:leadership_roles,id',
-        ]);
+    /**
+     * Create a new leader (WITH MULTIPLE ROLES)
+     */
+ /**
+ * Create a new leader (WITH MULTIPLE ROLES)
+ */
+public function store(Request $request)
+{
+    $validated = $request->validate([
+        'user_id'   => 'required|exists:users,id',
+        'role_ids'  => 'required|array',
+        'role_ids.*'=> 'exists:leadership_roles,id',
+    ]);
 
-        $leader = new Leader();
-        $leader->user_id = $validated['user_id'] ?? null;
-        $leader->full_name = $validated['full_name'] ?? null;
-        $leader->phone = $validated['phone'] ?? null;
-        $leader->email = $validated['email'] ?? null;
-        $leader->leadership_role_id = $validated['role_id'];
-        $leader->status = 'active';
-        $leader->save();
+    // Prevent same user becoming leader twice
+    $user = User::findOrFail($validated['user_id']);
+    $leader = $user->leader ?? Leader::create([
+        'leader_code' => 'LEAD-' . uniqid(),
+        'user_id'     => $user->id,
+        'full_name'   => $user->full_name,
+        'phone'       => $user->phone,
+        'email'       => $user->email,
+        'status'      => 'active',
+    ]);
 
-        // ✅ Update user role
-        if ($leader->user_id) {
-            $user = User::find($leader->user_id);
-            $role = LeadershipRole::find($leader->leadership_role_id);
-            if ($user && $role) {
-                $user->role = $role->title;
-                $user->save();
-            }
-        }
-
-        return response()->json([
-            'message' => 'Leader saved successfully.',
-            'leader' => $leader->load(['user', 'role']),
-        ], 201);
+    // Attach new roles without removing existing ones
+    $existingRoleIds = $leader->roles->pluck('id')->toArray();
+    $newRoleIds = array_diff($validated['role_ids'], $existingRoleIds);
+    if (!empty($newRoleIds)) {
+        $leader->roles()->attach($newRoleIds);
     }
 
+    // Mark system role
+    $user->update(['role' => 'kiongozi']);
+
+    return response()->json([
+        'status' => 'success',
+        'message' => 'Kiongozi ameongezwa kwa mafanikio.',
+        'leader' => $leader->load('roles'),
+    ], 201);
+}
+
+/**
+ * Update leader details + roles
+ */
+public function update(Request $request, $id)
+{
+    $leader = Leader::findOrFail($id);
+
+    $validated = $request->validate([
+        'user_id'    => 'nullable|exists:users,id',
+        'full_name'  => 'required_without:user_id|string|max:255',
+        'phone'      => 'required_without:user_id|string|max:20',
+        'email'      => 'nullable|email|max:255',
+        'role_ids'   => 'required|array',
+        'role_ids.*' => 'exists:leadership_roles,id',
+        'status'     => 'nullable|in:active,retired',
+    ]);
+
+    // Update user assignment
+    if (!empty($validated['user_id'])) {
+        $user = User::findOrFail($validated['user_id']);
+
+        // Prevent assigning same user to multiple leaders
+        $exists = Leader::where('user_id', $user->id)
+            ->where('id', '!=', $leader->id)
+            ->exists();
+
+        if ($exists) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'User is already assigned as a leader.',
+            ], 422);
+        }
+
+        $leader->update([
+            'user_id'   => $user->id,
+            'full_name' => $user->full_name,
+            'phone'     => $user->phone,
+            'email'     => $user->email,
+            'status'    => $validated['status'] ?? $leader->status,
+        ]);
+
+        // Ensure system role
+        $user->update(['role' => 'kiongozi']);
+    } else {
+        $leader->update([
+            'user_id'   => null,
+            'full_name' => $validated['full_name'],
+            'phone'     => $validated['phone'],
+            'email'     => $validated['email'] ?? $leader->email,
+            'status'    => $validated['status'] ?? $leader->status,
+        ]);
+    }
+
+    // Attach new roles without removing existing ones
+    $existingRoleIds = $leader->roles->pluck('id')->toArray();
+    $newRoleIds = array_diff($validated['role_ids'], $existingRoleIds);
+    if (!empty($newRoleIds)) {
+        $leader->roles()->attach($newRoleIds);
+    }
+
+    return response()->json([
+        'status' => 'success',
+        'message' => 'Kiongozi amesahihishwa kikamilifu.',
+        'leader' => $leader->load('roles'),
+    ]);
+}
+
+
+    /**
+     * Update leader details + roles
+     */
+   
+    /**
+     * Delete leader
+     */
     public function destroy($id)
     {
         $leader = Leader::findOrFail($id);
 
         if ($leader->user_id) {
-            $user = User::find($leader->user_id);
-            if ($user) {
-                $user->role = 'mshirika';
-                $user->save();
-            }
+            User::where('id', $leader->user_id)
+                ->update(['role' => 'mshirika']);
         }
 
+        $leader->roles()->detach();
         $leader->delete();
 
-        return response()->json(['message' => 'Leader deleted.']);
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Leader deleted.',
+        ]);
     }
 
+    /**
+     * Retire leader
+     */
     public function retire($id)
     {
         $leader = Leader::findOrFail($id);
-        $leader->status = 'retired';
-        $leader->save();
+        $leader->update(['status' => 'retired']);
 
         if ($leader->user_id) {
-            $user = User::find($leader->user_id);
-            if ($user) {
-                $user->role = 'mshirika';
-                $user->save();
-            }
+            User::where('id', $leader->user_id)
+                ->update(['role' => 'mshirika']);
         }
 
         return response()->json([
@@ -108,75 +193,47 @@ class LeaderController extends Controller
         ]);
     }
 
+    /**
+     * Restore retired leader
+     */
     public function restore($id)
     {
         $leader = Leader::findOrFail($id);
-        $leader->status = 'active';
-        $leader->save();
+        $leader->update(['status' => 'active']);
 
         if ($leader->user_id) {
-            $user = User::find($leader->user_id);
-            $role = LeadershipRole::find($leader->leadership_role_id);
-            if ($user && $role) {
-                $user->role = $role->title;
-                $user->save();
-            }
+            User::where('id', $leader->user_id)
+                ->update(['role' => 'kiongozi']);
         }
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Leader restored.',
+            'message' => 'Leader restored successfully.',
         ]);
     }
 
+    /**
+     * List retired leaders
+     */
     public function retired()
     {
-        $leaders = Leader::with(['user', 'role'])
+        $leaders = Leader::with(['user', 'roles'])
             ->where('status', 'retired')
             ->latest()
             ->get();
 
-        $formatted = $leaders->map(function ($leader) {
-            return [
-                'id' => $leader->id,
-                'name' => $leader->user->full_name ?? $leader->full_name,
-                'email' => $leader->user->email ?? $leader->email,
-                'phone' => $leader->user->phone ?? $leader->phone,
-                'role' => ($leader->role->title ?? '—') . ' Mstaafu',
-            ];
-        });
+        $formatted = $leaders->map(fn ($leader) => [
+            'id' => $leader->id,
+            'name' => $leader->user->full_name ?? $leader->full_name,
+            'email' => $leader->user->email ?? $leader->email,
+            'phone' => $leader->user->phone ?? $leader->phone,
+            'roles' => $leader->roles->pluck('title')
+                ->map(fn ($r) => $r . ' Mstaafu'),
+        ]);
 
         return response()->json([
             'status' => 'success',
             'retired' => $formatted,
         ]);
     }
-
-    public function updateRole(Request $request, $id)
-    {
-        $request->validate([
-            'role' => 'required|string|exists:leadership_roles,title',
-        ]);
-
-        $leader = Leader::findOrFail($id);
-        $role = LeadershipRole::where('title', $request->role)->firstOrFail();
-
-        $leader->leadership_role_id = $role->id;
-        $leader->save();
-
-        // Update user's role too
-        if ($leader->user_id) {
-            $user = User::find($leader->user_id);
-            if ($user) {
-                $user->role = $role->title;
-                $user->save();
-            }
-        }
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Nafasi imesasishwa kikamilifu.',
-        ]);
-    }
-
 }

@@ -356,43 +356,50 @@ class AuthController extends Controller
         ]);
     }
 
+
+
     /**
      * ALL USERS
      */
+
     public function allUsers()
-    {
-        try {
-            $members = Member::with(['user', 'groups'])->get();
+{
+    try {
+        $members = Member::with(['user', 'groups', 'user.leader.roles'])->get();
 
-            $users = $members->map(function ($member) {
-                $user = $member->user;
+        $users = $members->map(function ($member) {
+            $user = $member->user;
 
-                return [
-                    'id' => $user->id,
-                    'full_name' => $member->full_name ?? $user->full_name,
-                    'email' => $member->email ?? $user->email,
-                    'phone' => $member->phone_number ?? $user->phone,
-                    'gender' => $member->gender ?? $user->gender,
-                    'birth_date' => $member->birth_date ?? $user->birth_date,
-                    'birth_place' => $member->birth_place ?? $user->birth_place,
-                    'role' => $user->role,
-                    'created_at' => $user->created_at,
-                    'member_id' => $member->id,
-                     'residential_zone' =>
+            return [
+                'id' => $user->id,
+                'full_name' => $member->full_name ?? $user->full_name,
+                'email' => $member->email ?? $user->email,
+                'phone' => $member->phone_number ?? $user->phone,
+                'gender' => $member->gender ?? $user->gender,
+                'birth_date' => $member->birth_date ?? $user->birth_date,
+                'birth_place' => $member->birth_place ?? $user->birth_place,
+                'role' => $user->role,
+                'leadership_roles' => $user->leader?->roles->pluck('title') ?? collect(),
+                'created_at' => $user->created_at,
+                'member_id' => $member->id,
+                'residential_zone' =>
                     $member->residential_zone
                     ?? $user->zone
                     ?? null,
-                    'membership_status' => $member->membership_status,
-                    'membership_number' => $member->membership_number,
-                    'deactivation_reason' => $member->deactivation_reason,
-                    'groups' => $member->groups->map(fn ($group) => [
-                        'id' => $group->id,
-                        'name' => $group->name,
-                    ]),
-                ];
-            });
+                'membership_status' => $member->membership_status,
+                'membership_number' => $member->membership_number,
+                'deactivation_reason' => $member->deactivation_reason,
+                'groups' => $member->groups->map(fn ($group) => [
+                    'id' => $group->id,
+                    'name' => $group->name,
+                ]),
+            ];
+        });
 
-            $nonMembers = User::doesntHave('member')->get()->map(function ($user) {
+        $nonMembers = User::doesntHave('member')
+            ->with('leader.roles') // eager load leader roles for non-members
+            ->get()
+            ->map(function ($user) {
                 return [
                     'id' => $user->id,
                     'full_name' => $user->full_name,
@@ -402,6 +409,7 @@ class AuthController extends Controller
                     'birth_date' => $user->birth_date,
                     'birth_place' => $user->birth_place,
                     'role' => $user->role,
+                    'leadership_roles' => $user->leader?->roles->pluck('title') ?? collect(),
                     'created_at' => $user->created_at,
                     'member_id' => null,
                     'membership_status' => null,
@@ -410,17 +418,17 @@ class AuthController extends Controller
                 ];
             });
 
-            return response()->json([
-                'status' => 'success',
-                'users' => $users->merge($nonMembers),
-            ]);
-        } catch (\Throwable $e) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Server error: ' . $e->getMessage(),
-            ], 500);
-        }
+        return response()->json([
+            'status' => 'success',
+            'users' => $users->merge($nonMembers),
+        ]);
+    } catch (\Throwable $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Server error: ' . $e->getMessage(),
+        ], 500);
     }
+}
 
 
     /**
@@ -453,36 +461,38 @@ public function forgotPassword(Request $request)
 /**
  * RESET PASSWORD
  */
+/**
+ * RESET PASSWORD (without token)
+ */
 public function resetPassword(Request $request)
 {
     $request->validate([
-        'token' => 'required',
         'email' => 'required|email|exists:users,email',
         'password' => 'required|string|min:6|confirmed',
     ]);
 
-    $status = Password::reset(
-        $request->only('email', 'password', 'password_confirmation', 'token'),
-        function ($user, $password) {
-            $user->forceFill([
-                'password' => Hash::make($password),
-                'remember_token' => Str::random(60),
-            ])->save();
-        }
-    );
+    // Find user by email
+    $user = User::where('email', $request->email)->first();
 
-    if ($status === Password::PASSWORD_RESET) {
+    if (!$user) {
         return response()->json([
-            'status' => 'success',
-            'message' => 'Password reset successfully.',
-        ]);
+            'status' => 'error',
+            'message' => 'User not found.',
+        ], 404);
     }
 
+    // Update password directly
+    $user->update([
+        'password' => Hash::make($request->password),
+        'remember_token' => Str::random(60),
+    ]);
+
     return response()->json([
-        'status' => 'error',
-        'message' => 'Invalid token or email.',
-    ], 400);
+        'status' => 'success',
+        'message' => 'Password reset successfully.',
+    ]);
 }
+
 
 }
 

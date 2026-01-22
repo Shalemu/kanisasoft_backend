@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
@@ -13,16 +12,8 @@ class User extends Authenticatable
 {
     use HasApiTokens, Notifiable;
 
-
-
-    /**
-     * The database table used by the model.
-     */
     protected $table = 'users';
 
-    /**
-     * The attributes that are mass assignable.
-     */
     protected $fillable = [
         'full_name',
         'gender',
@@ -36,20 +27,14 @@ class User extends Authenticatable
         'phone',
         'email',
         'password',
-        'role',
+        'role', // SYSTEM role only (admin | kiongozi | mshirika)
     ];
-    
-    /**
-     * The attributes that should be hidden for arrays.
-     */
+
     protected $hidden = [
         'password',
         'remember_token',
     ];
 
-    /**
-     * The attributes that should be cast.
-     */
     protected $casts = [
         'birth_date' => 'date',
         'children_count' => 'integer',
@@ -61,8 +46,28 @@ class User extends Authenticatable
         return $date->format('Y-m-d');
     }
 
+    // -------------------------
+    // Relationships
+    // -------------------------
+
     /**
-     * One-to-One Relationship: A user may be a registered church member.
+     * A user may have multiple leader records (for multiple positions)
+     */
+    public function leaders()
+    {
+        return $this->hasMany(Leader::class);
+    }
+
+    /**
+     * Optional backward compatibility: first leader
+     */
+    public function leader()
+    {
+        return $this->hasOne(Leader::class);
+    }
+
+    /**
+     * A user may be a church member
      */
     public function member()
     {
@@ -70,18 +75,47 @@ class User extends Authenticatable
     }
 
     /**
-     * Check if user has a specific role by name.
+     * All leadership roles of this user across all leaders
      */
-    public function hasRole($roleName)
+    public function roles()
     {
-        return $this->role === $roleName;
+        return $this->leaders->flatMap(fn($leader) => $leader->roles)->unique('id');
     }
 
- 
+    // -------------------------
+    // Helper Methods
+    // -------------------------
 
-public function sendPasswordResetNotification($token)
-{
-    $this->notify(new ResetPasswordNotification($token));
-}
+    /**
+     * Convenient accessor
+     * Allows $user->roles to be used like a normal attribute
+     */
+    public function getRolesAttribute()
+    {
+        return $this->roles();
+    }
 
+    /**
+     * Check system role (admin | kiongozi | mshirika)
+     */
+    public function hasSystemRole(string $role): bool
+    {
+        return $this->role === $role;
+    }
+
+    /**
+     * Check if user has a specific leadership role
+     */
+    public function hasLeadershipRole(string $roleTitle): bool
+    {
+        return $this->roles()->contains('title', $roleTitle);
+    }
+
+    /**
+     * Send password reset notification
+     */
+    public function sendPasswordResetNotification($token)
+    {
+        $this->notify(new ResetPasswordNotification($token));
+    }
 }
