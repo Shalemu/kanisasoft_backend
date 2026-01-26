@@ -12,6 +12,9 @@ use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
 use App\Notifications\NewUserRegistered;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule; // also needed for Rule::in()
+
 
 
 
@@ -183,53 +186,75 @@ class AuthController extends Controller
     /**
      * UPDATE PROFILE
      */
-    public function updateProfile(Request $request)
-    {
-       $request->validate([
-    'full_name' => 'required|string|max:255',
-    'gender' => 'required|in:M,F',
-    'birth_date' => 'nullable|date',
-    'birth_place' => 'nullable|string|max:255',
-    'marital_status' => 'nullable|in:Ameoa,Ameolewa,Hajaoa,Hajaolewa,Mjane,Mgane',
-    'spouse_name' => 'sometimes|required_if:marital_status,Ameoa,Ameolewa|string|max:255',
-    'children_count' => 'nullable|integer|min:0',
-    'zone' => 'nullable|string|max:255',
-    'phone' => 'required|string|max:20|unique:users,phone',
-    'email' => 'required|email|max:255|unique:users,email',
-    'password' => 'required|string|min:6|confirmed',
+public function updateProfile(Request $request)
+{
+    $user = $request->user();
 
-    // Imani
-    'date_of_conversion' => 'nullable|date',
-    'church_of_conversion' => 'nullable|string',
-    'baptism_date' => 'nullable|date',
-    'baptism_place' => 'nullable|string',
-    'baptizer_name' => 'nullable|string',
-    'baptizer_title' => 'nullable|string',
-    'previous_church' => 'nullable|string',
-    'church_service' => 'nullable|string',
-    'service_duration' => 'nullable|string',
+    // Normalize fields before validation
+    $request->merge([
+        'marital_status' => isset($request->marital_status) ? trim($request->marital_status) : null,
+        'gender' => match ($request->gender ?? '') {
+            'Mwanaume' => 'M',
+            'Mwanamke' => 'F',
+            default => $request->gender,
+        },
+        'phone' => $this->formatTanzaniaPhone($request->phone ?? ''),
+    ]);
 
-    // Elimu
-    'education_level' => 'nullable|string',
-    'profession' => 'nullable|string',
-    'occupation' => 'nullable|string',
-    'work_place' => 'nullable|string',
-    'work_contact' => 'nullable|string',
+    // Validation rules
+    $request->validate([
+        'full_name' => 'required|string|max:255',
+        'gender' => 'required|in:M,F',
+        'birth_date' => 'nullable|date',
+        'birth_place' => 'nullable|string|max:255',
+        'marital_status' => ['nullable', Rule::in(['Ameoa','Ameolewa','Hajaoa','Hajaolewa','Mjane','Mgane'])],
+        'spouse_name' => 'sometimes|required_if:marital_status,Ameoa,Ameolewa|string|max:255',
+        'children_count' => 'nullable|integer|min:0',
+        'zone' => 'nullable|string|max:255',
+        'phone' => ['required','string','max:20','unique:users,phone,' . $user->id],
+        'email' => ['required','email','max:255','unique:users,email,' . $user->id],
 
-    // Familia
-    'lives_alone' => 'nullable|boolean',
-    'lives_with' => 'nullable|string',
-]);
+        // Imani
+        'date_of_conversion' => 'nullable|date',
+        'church_of_conversion' => 'nullable|string',
+        'baptism_date' => 'nullable|date',
+        'baptism_place' => 'nullable|string',
+        'baptizer_name' => 'nullable|string',
+        'baptizer_title' => 'nullable|string',
+        'previous_church' => 'nullable|string',
+        'church_service' => 'nullable|string',
+        'service_duration' => 'nullable|string',
 
-        $formattedPhone = $this->formatTanzaniaPhone($request->phone);
+        // Elimu
+        'education_level' => 'nullable|string',
+        'profession' => 'nullable|string',
+        'occupation' => 'nullable|string',
+        'work_place' => 'nullable|string',
+        'work_contact' => 'nullable|string',
 
-        $user = $request->user();
+        // Familia
+        'lives_alone' => 'nullable|boolean',
+        'lives_with' => 'nullable|string',
+    ]);
+
+    // Start transaction
+    DB::beginTransaction();
+    try {
+        // Update User
         $user->update([
             'full_name' => $request->full_name,
-            'phone' => $formattedPhone,
+            'gender' => $request->gender,
+            'birth_date' => $request->birth_date,
+            'birth_place' => $request->birth_place,
+            'marital_status' => $request->marital_status,
+            'spouse_name' => $request->spouse_name,
+            'children_count' => $request->children_count,
+            'zone' => $request->zone,
+            'phone' => $request->phone,
             'email' => $request->email,
         ]);
 
+        // Update or create Member
         $member = Member::updateOrCreate(
             ['user_id' => $user->id],
             [
@@ -241,7 +266,7 @@ class AuthController extends Controller
                 'spouse_name' => $request->spouse_name,
                 'number_of_children' => $request->children_count,
                 'residential_zone' => $request->zone,
-                'phone_number' => $formattedPhone,
+                'phone_number' => $request->phone,
                 'email' => $request->email,
 
                 'date_of_conversion' => $request->date_of_conversion,
@@ -265,12 +290,22 @@ class AuthController extends Controller
             ]
         );
 
+        DB::commit();
+
         return response()->json([
             'status' => 'success',
             'message' => 'Profile updated successfully.',
-            'member' => $member,
+            'member' => $member->fresh()->load('user'),
         ]);
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Server error: ' . $e->getMessage(),
+        ], 500);
     }
+}
+
 
     /**
      * LOGIN

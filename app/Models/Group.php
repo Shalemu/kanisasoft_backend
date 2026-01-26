@@ -13,23 +13,27 @@ class Group extends Model
 
     protected $fillable = [
         'name',
-        'zone',
-        'leader',
-        'contact',
+        'leader_id', 
     ];
 
     /**
-     * Many-to-many relationship with members.
+     * Many-to-many relationship with members
      */
     public function members()
     {
-        return $this->belongsToMany(Member::class, 'member_group', 'group_id', 'member_id')
-                    ->withTimestamps();
+        return $this->belongsToMany(
+            Member::class,
+            'member_group',
+            'group_id',
+            'member_id'
+        )->withTimestamps();
     }
 
+    /**
+     * Group leader (Member)
+     */
     public function leader()
     {
         return $this->belongsTo(Member::class, 'leader_id');
     }
-
 }

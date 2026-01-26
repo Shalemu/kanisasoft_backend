@@ -5,137 +5,193 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Group;
+use App\Models\Member;
 use Illuminate\Support\Facades\Validator;
 
 class GroupsController extends Controller
 {
+    /**
+     * Normalize membership number (1 -> 0001)
+     */
+    private function normalizeMembershipNumber(string|int $number): string
+    {
+        return str_pad((int) $number, 4, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * List all groups
+     */
     public function index()
     {
-        $groups = Group::with('members')->get();
+        $groups = Group::with(['leader', 'members'])->get();
+
         return response()->json([
             'status' => 'success',
-            'groups' => $groups
+            'groups' => $groups,
         ]);
     }
 
+    /**
+     * Show a single group
+     */
     public function show($id)
     {
-        $group = Group::with('members')->find($id);
+        $group = Group::with(['leader', 'members'])->find($id);
+
         if (!$group) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Group not found'
+                'message' => 'Group not found',
             ], 404);
         }
 
         return response()->json([
             'status' => 'success',
-            'group' => $group
+            'group' => $group,
         ]);
     }
 
-    public function members($id)
-    {
-        $group = Group::with(['members.user', 'leader'])->find($id);
+    /**
+     * Create a new group
+     */
+/**
+ * Create a new group
+ */
+public function store(Request $request)
+{
+    // Validate input
+    $validator = Validator::make($request->all(), [
+        'name' => 'required|string|max:255',
+        'leader_membership_number' => 'nullable|string',
+    ]);
 
-        if (!$group) {
+    if ($validator->fails()) {
+        return response()->json([
+            'status' => 'error',
+            'errors' => $validator->errors(),
+        ], 422);
+    }
+
+    // Check if a group with the same name exists (ignore deleted groups)
+    $existing = Group::where('name', $request->name)->first();
+    if ($existing) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Jina la kundi tayari limepatikana.',
+        ], 409);
+    }
+
+    $leaderId = null;
+
+    // Verify leader membership number if provided
+    if ($request->filled('leader_membership_number')) {
+        $normalized = $this->normalizeMembershipNumber($request->leader_membership_number);
+        $member = Member::where('membership_number', $normalized)->first();
+
+        if (!$member) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Group not found'
+                'message' => 'Huyo mshirika hana namba ya ushirika.',
             ], 404);
         }
 
-        return response()->json([
-            'status' => 'success',
-            'leader_id' => $group->leader_id,
-            'members' => $group->members->map(function ($m) {
-                return [
-                    'id' => $m->id,
-                    'full_name' => $m->full_name,
-                    'phone' => $m->phone_number,
-                    'email' => $m->email,
-                    'role' => $m->user?->role,
-                    'photo_url' => $m->user?->photo_url ? asset($m->user->photo_url) : null,
-                ];
-            }),
-        ]);
+        $leaderId = $member->id;
     }
 
-    public function store(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'name'    => 'required|string|max:255|unique:groups,name',
-            'zone'    => 'nullable|string|max:255',
-            'leader'  => 'nullable|string|max:255',
-            'contact' => 'nullable|string|max:255',
-        ]);
+    $group = Group::create([
+        'name' => $request->name,
+        'leader_id' => $leaderId,
+    ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'status' => 'error',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
+    return response()->json([
+        'status' => 'success',
+        'message' => 'Kundi limeundwa kikamilifu.',
+        'group' => $group->load('leader'),
+    ], 201);
+}
 
-        $group = Group::create([
-            'name'    => $request->input('name'),
-            'zone'    => $request->input('zone'),
-            'leader'  => $request->input('leader'),
-            'contact' => $request->input('contact'),
-        ]);
+/**
+ * Update group
+ */
+public function update(Request $request, $id)
+{
+    $group = Group::find($id);
 
+    if (!$group) {
         return response()->json([
-            'status' => 'success',
-            'message' => 'Group created successfully',
-            'group' => $group
-        ], 201);
+            'status' => 'error',
+            'message' => 'Kundi halikupatikana.',
+        ], 404);
     }
 
-    public function update(Request $request, $id)
-    {
-        $group = Group::find($id);
-        if (!$group) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Group not found'
-            ], 404);
-        }
+    $validator = Validator::make($request->all(), [
+        'name' => 'sometimes|required|string|max:255',
+        'leader_membership_number' => 'nullable|string',
+    ]);
 
-        $validator = Validator::make($request->all(), [
-            'name'    => 'sometimes|required|string|max:255|unique:groups,name,' . $id,
-            'zone'    => 'nullable|string|max:255',
-            'leader'  => 'nullable|string|max:255',
-            'contact' => 'nullable|string|max:255',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'status' => 'error',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $group->update([
-            'name'    => $request->input('name', $group->name),
-            'zone'    => $request->input('zone', $group->zone),
-            'leader'  => $request->input('leader', $group->leader),
-            'contact' => $request->input('contact', $group->contact),
-        ]);
-
+    if ($validator->fails()) {
         return response()->json([
-            'status' => 'success',
-            'message' => 'Group updated successfully',
-            'group' => $group
-        ]);
+            'status' => 'error',
+            'errors' => $validator->errors(),
+        ], 422);
     }
 
+    // Check if name is unique (ignore current group)
+    if ($request->filled('name')) {
+        $exists = Group::where('name', $request->name)
+            ->where('id', '!=', $group->id)
+            ->first();
+
+        if ($exists) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Jina la kundi tayari limepatikana.',
+            ], 409);
+        }
+
+        $group->name = $request->name;
+    }
+
+    // Verify leader membership number
+    if ($request->has('leader_membership_number')) {
+        if (!$request->leader_membership_number) {
+            $group->leader_id = null;
+        } else {
+            $normalized = $this->normalizeMembershipNumber($request->leader_membership_number);
+            $member = Member::where('membership_number', $normalized)->first();
+
+            if (!$member) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Huyo mshirika hana namba ya ushirika.',
+                ], 404);
+            }
+
+            $group->leader_id = $member->id;
+        }
+    }
+
+    $group->save();
+
+    return response()->json([
+        'status' => 'success',
+        'message' => 'Kundi limehaririwa kikamilifu.',
+        'group' => $group->load('leader'),
+    ]);
+}
+
+
+    /**
+     * Delete group
+     */
     public function destroy($id)
     {
         $group = Group::find($id);
+
         if (!$group) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Group not found'
+                'message' => 'Group not found',
             ], 404);
         }
 
@@ -143,46 +199,87 @@ class GroupsController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Group deleted successfully'
+            'message' => 'Kundi limefutwa kikamilifu.',
         ]);
     }
 
-    public function addMember(Request $request, Group $group)
-    {
-        $request->validate([
-            'member_id' => 'required|exists:members,id',
-        ]);
+    /**
+     * Add member to group by membership number
+     */
+public function addMember(Request $request, Group $group)
+{
+    $request->validate([
+        'membership_number' => 'required',
+    ]);
 
-        // ✅ Only allow if logged-in user is the leader of this group
-        if ($request->user()->member->id !== $group->leader_id) {
+    $normalized = $this->normalizeMembershipNumber($request->membership_number);
+
+    $member = Member::where('membership_number', $normalized)->first();
+    if (!$member) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Mshirika mwenye namba hiyo hajapatikana.',
+        ], 404);
+    }
+
+    $user = $request->user();
+
+    // ✅ ADMIN CAN ADD TO ANY GROUP
+    if (!$user->hasSystemRole('admin')) {
+
+        // ❌ must be a member AND leader of this group
+        if (!$user->member || $user->member->id !== $group->leader_id) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Huna ruhusa ya kuongeza washirika kwenye kundi hili.',
             ], 403);
         }
-
-        if ($group->members()->where('member_id', $request->member_id)->exists()) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Mshirika tayari yupo kwenye kundi hili.',
-            ], 409);
-        }
-
-        $group->members()->attach($request->member_id);
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Mshirika ameongezwa kwenye kundi.',
-        ]);
     }
 
+    // 🚫 Already exists
+    if ($group->members()->where('member_id', $member->id)->exists()) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Mshirika tayari yupo kwenye kundi hili.',
+        ], 409);
+    }
+
+    $group->members()->attach($member->id);
+
+    return response()->json([
+        'status' => 'success',
+        'message' => 'Mshirika ameongezwa kwenye kundi.',
+        'member' => [
+            'full_name' => $member->full_name,
+            'membership_number' => $member->membership_number,
+        ],
+        'group' => [
+            'id' => $group->id,
+            'name' => $group->name,
+        ],
+    ]);
+}
+
+
+    /**
+     * Remove member from group
+     */
     public function removeMember(Request $request, Group $group)
     {
         $request->validate([
-            'member_id' => 'required|exists:members,id',
+            'membership_number' => 'required',
         ]);
 
-        // ✅ Only allow if logged-in user is the leader of this group
+        $normalized = $this->normalizeMembershipNumber($request->membership_number);
+        $member = Member::where('membership_number', $normalized)->first();
+
+        if (!$member) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Mshirika hajapatikana.',
+            ], 404);
+        }
+
         if ($request->user()->member->id !== $group->leader_id) {
             return response()->json([
                 'status' => 'error',
@@ -190,7 +287,7 @@ class GroupsController extends Controller
             ], 403);
         }
 
-        $group->members()->detach($request->member_id);
+        $group->members()->detach($member->id);
 
         return response()->json([
             'status' => 'success',
@@ -198,54 +295,61 @@ class GroupsController extends Controller
         ]);
     }
 
-    public function filterByZone(Request $request)
-    {
-        $zone = $request->query('zone');
-        $groups = Group::with('members')
-            ->when($zone, fn($q) => $q->where('zone', $zone))
-            ->get();
-
-        return response()->json(['status' => 'success', 'groups' => $groups]);
-    }
-
-    public function searchGroupMembers($id, Request $request)
-    {
-        $keyword = $request->query('search');
-        $group = Group::with(['members.user'])->findOrFail($id);
-
-        $filtered = $group->members->filter(function ($m) use ($keyword) {
-            return str_contains(strtolower($m->full_name), strtolower($keyword))
-                || str_contains($m->phone_number, $keyword)
-                || str_contains(strtolower($m->user?->role ?? ''), strtolower($keyword));
-        })->values();
-
-        return response()->json([
-            'status' => 'success',
-            'members' => $filtered,
-        ]);
-    }
-
-    // ✅ Assign or remove group leader
+    /**
+     * Assign or remove group leader using membership number
+     */
     public function assignLeader(Request $request, Group $group)
     {
-        $memberId = $request->input('member_id');
-
-        // If null, remove leader
-        if (is_null($memberId)) {
+        if (!$request->membership_number) {
             $group->leader_id = null;
-        } else {
-            $request->validate([
-                'member_id' => 'exists:members,id',
+            $group->save();
+
+            return response()->json([ 
+                'status' => 'success',
+                'message' => 'Kiongozi wa kundi ameondolewa.',
             ]);
-            $group->leader_id = $memberId;
         }
 
+        $normalized = $this->normalizeMembershipNumber($request->membership_number);
+        $member = Member::where('membership_number', $normalized)->first();
+
+        if (!$member) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Namba ya ushirika haipo.',
+            ], 404);
+        }
+
+        $group->leader_id = $member->id;
         $group->save();
 
         return response()->json([
             'status' => 'success',
-            'message' => $memberId ? 'Leader assigned to group successfully' : 'Leader removed from group',
-            'group' => $group->load('leader'),
+            'message' => 'Kiongozi wa kundi amewekwa kikamilifu.',
+            'leader' => [
+                'full_name' => $member->full_name,
+                'membership_number' => $member->membership_number,
+            ],
+        ]);
+    }
+
+    /**
+     * Search members in group
+     */
+    public function searchGroupMembers($id, Request $request)
+    {
+        $keyword = strtolower($request->query('search'));
+        $group = Group::with(['members.user'])->findOrFail($id);
+
+        $filtered = $group->members->filter(fn ($m) =>
+            str_contains(strtolower($m->full_name), $keyword) ||
+            str_contains($m->membership_number, $keyword) ||
+            str_contains(strtolower($m->user?->role ?? ''), $keyword)
+        )->values();
+
+        return response()->json([
+            'status' => 'success',
+            'members' => $filtered,
         ]);
     }
 }
