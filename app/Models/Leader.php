@@ -10,6 +10,7 @@ class Leader extends Model
     use HasFactory;
 
     protected $fillable = [
+        'leader_code',
         'full_name',
         'phone',
         'email',
@@ -18,15 +19,27 @@ class Leader extends Model
     ];
 
     /**
+     * Auto-generate leader_code when creating a leader
+     */
+    protected static function booted()
+    {
+        static::creating(function ($leader) {
+            if (empty($leader->leader_code)) {
+                $leader->leader_code = 'LEAD-' . uniqid();
+            }
+        });
+    }
+
+    /**
      * A leader can have many leadership roles (many-to-many)
      */
     public function roles()
     {
         return $this->belongsToMany(
             LeadershipRole::class,
-            'leader_leadership_role',
-            'leader_id',
-            'leadership_role_id'
+            'leader_leadership_role',   // pivot table
+            'leader_id',                // THIS model key in pivot
+            'leadership_role_id'        // related model key
         )->withTimestamps();
     }
 

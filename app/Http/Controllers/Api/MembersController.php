@@ -140,6 +140,15 @@ class MembersController extends Controller
         }
     }
 
+    public function byUser($userId)
+{
+    $member = Member::where('user_id', $userId)->first();
+    if (!$member) {
+        return response()->json(['message' => 'Member not found'], 404);
+    }
+    return response()->json(['member' => $member]);
+}
+
 
 
 

@@ -48,6 +48,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/members/{member}/deactivate', [MembersController::class, 'deactivate']);
     Route::post('/members/{member}/activate', [MembersController::class, 'activate']);
     Route::delete('/members/{id}/delete-both', [MembersController::class, 'deleteBoth']);
+    Route::get('/members/by-user/{user}', [MembersController::class, 'byUser']);
+
 
     // Guests
     Route::apiResource('guests', GuestsController::class);
@@ -75,6 +77,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user-role-assignments', [UserRoleController::class, 'index']);
     Route::put('/leadership-roles/{id}', [LeadershipRoleController::class, 'update']);
     Route::delete('/leadership-roles/{id}', [LeadershipRoleController::class, 'destroy']);
+      Route::put('/{id}/roles', [LeaderController::class, 'updateRole']); 
+      // Update all leader details + roles
+        Route::put('/leaders/{id}', [LeaderController::class, 'update']);
+
+        // Update only roles
+        Route::put('/leaders/{id}/roles', [LeaderController::class, 'updateRole']);
 
     // Events
     Route::apiResource('events', EventController::class);
