@@ -188,6 +188,31 @@ class AuthController extends Controller
         }
     }
 
+    public function getUsersByMonth(Request $request)
+{
+    $month = $request->month;
+    $year = $request->year ?? now()->year;
+
+    $users = User::whereYear('created_at', $year)
+                ->whereMonth('created_at', $month)
+                ->get();
+
+    return response()->json([
+        'status' => 'success',
+        'count' => $users->count(),
+        'users' => $users
+    ]);
+}
+
+public function monthlyRegistrations()
+{
+    $data = User::selectRaw('MONTH(created_at) as month, COUNT(*) as total')
+                ->groupBy('month')
+                ->orderBy('month')
+                ->get();
+
+    return response()->json($data);
+}
 
     
 
@@ -320,39 +345,76 @@ public function updateProfile(Request $request)
     /**
      * LOGIN
      */
-    public function login(Request $request)
-    {
-        $request->validate([
-            'email' => 'required|email',
-            'password' => 'required|string',
-        ]);
+     public function login(Request $request)
+{
+    $request->validate([
+        'login' => 'required|string',
+        'password' => 'required|string',
+    ]);
 
-        if (!Auth::attempt($request->only('email', 'password'))) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Invalid credentials',
-            ], 401);
+    $loginInput = trim($request->login);
+
+    // Check if input is email
+    if (filter_var($loginInput, FILTER_VALIDATE_EMAIL)) {
+        $fieldType = 'email';
+    } else {
+        $fieldType = 'phone';
+
+        // Normalize phone number
+        $loginInput = preg_replace('/\D/', '', $loginInput);
+
+        // Convert 0712... -> 255712...
+        if (str_starts_with($loginInput, '0')) {
+            $loginInput = '255' . substr($loginInput, 1);
         }
 
-        $user = Auth::user();
-
-        if (!$user->role) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Asante kwa kujisajili. Maombi yako yanahitaji kuidhinishwa na uongozi wa kanisa. Tutakujulisha mara tu utakapokubalika.',
-            ], 403);
+        // Convert +255712... -> 255712...
+        if (str_starts_with($request->login, '+255')) {
+            $loginInput = substr($request->login, 1);
         }
-
-        $token = $user->createToken('auth_token')->plainTextToken;
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Login successful',
-            'token' => $token,
-            'user' => $user,
-        ]);
     }
 
+    if (!Auth::attempt([
+        $fieldType => $loginInput,
+        'password' => $request->password
+    ])) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Email/Simu au neno la siri si sahihi',
+        ], 401);
+    }
+
+    $user = Auth::user();
+
+    if (!$user->role) {
+        return response()->json([
+            'status' => 'error',
+            'message' => 'Asante kwa kujisajili. Maombi yako yanahitaji kuidhinishwa.',
+        ], 403);
+    }
+
+    $leadershipRoles = [];
+
+    if ($user->role === 'kiongozi') {
+        $leader = \App\Models\Leader::with('roles')
+            ->where('user_id', $user->id)
+            ->first();
+
+        if ($leader) {
+            $leadershipRoles = $leader->roles->pluck('title')->toArray();
+        }
+    }
+
+    $token = $user->createToken('auth_token')->plainTextToken;
+
+    return response()->json([
+        'status' => 'success',
+        'message' => 'Login successful',
+        'token' => $token,
+        'user' => $user,
+        'leadership_roles' => $leadershipRoles,
+    ]);
+}
     /**
      * CHANGE PASSWORD
      */

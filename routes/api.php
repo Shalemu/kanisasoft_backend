@@ -58,6 +58,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/members/by-user/{user}', [MembersController::class, 'byUser']);
     Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/members/stats', [MembersController::class, 'stats']);
+
+    // get user by date
+    Route::get('/users/filter-by-month', [AuthController::class, 'getUsersByMonth']);
+    Route::get('/users/monthly-registrations', [AuthController::class, 'monthlyRegistrations']);
 });
 
 // Attendance
